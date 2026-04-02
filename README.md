@@ -35,3 +35,8 @@ Edit the credentials at the top of `augbotquant.js` before running:
 const WS_URL   = "ws://<server_ip>:8081/ws";
 const USERNAME = "augustya";
 const PASSWORD = "your_password";
+
+Run the Engine:
+Open your terminal or command prompt in the project folder and run:
+Bash
+node augbotquant.js
