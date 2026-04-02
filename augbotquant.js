@@ -194,6 +194,40 @@ const client = new HFTSiegeClient({
   password:   PASSWORD,
   reconnect:  true,
 });
+
+// 🚨 THE MONKEY PATCH: Intercept and fix SDK bugs from our side 🚨
+if (typeof client._dispatch === 'function') {
+  const originalDispatch = client._dispatch.bind(client);
+  
+  client._dispatch = function(msg) {
+    try {
+      let parsed = typeof msg === 'string' ? JSON.parse(msg) : msg;
+
+      // If it's the leaderboard and payload is an Array (the bug causing the crash)
+      if (parsed && parsed.type === "leaderboard" && Array.isArray(parsed.payload)) {
+        
+        // Translate PascalCase server keys to snake_case so the SDK finds them
+        const fixedEntries = parsed.payload.map(e => ({
+          participant_id: e.ParticipantID,
+          net_worth:      e.NetWorth,
+          cash:           e.Cash
+        }));
+
+        // Re-shape the payload into the { entries: [] } format the SDK is looking for
+        parsed.payload = { entries: fixedEntries };
+        
+        // Hand the fixed data back to the original SDK function
+        return originalDispatch(typeof msg === 'string' ? JSON.stringify(parsed) : parsed);
+      }
+    } catch (e) {
+      // If JSON parsing fails, just ignore it and let the SDK handle the error normally
+    }
+    
+    // For all other normal messages (prices, trades), pass them through untouched
+    return originalDispatch(msg);
+  };
+}
+// ═══════════════════════════════════════════════════════════════════
 const tickerStates = new Map();   
 let roundActive      = false;
 let remainingSecs    = 600;
