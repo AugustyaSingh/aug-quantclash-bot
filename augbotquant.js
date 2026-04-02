@@ -1,33 +1,33 @@
 "use strict";
 const { HFTSiegeClient } = require("./sdk/js/hft-siege-client");
-const WS_URL   = "ws://10.220.147.182:8081/ws";
+const WS_URL = "ws://10.220.147.182:8081/ws";
 const USERNAME = "augustya";
 const PASSWORD = "aug_1234hhh";
-const RING_SIZE            = 100;
-const OFI_WINDOW           = 20;
-const OFI_THRESHOLD        = 0.30;   
-const MAX_EXPOSURE_CENTS   = 2_000_000; 
-const ORDER_STRONG_CENTS   = 600_000;  
-const ORDER_MED_CENTS      = 300_000;  
-const ORDER_NEWS_CENTS     = 700_000;  
-const ORDER_NEWS_XL_CENTS  = 1_400_000;
-const WARMUP_TICKS         = OFI_WINDOW + 5;
-const COOLDOWN_MS          = 250;
-const ORDER_TTL_MS         = 800;
-const SWEEP_INTERVAL_MS    = 200;
-const TWAP_START_SECS      = 120;  
-const TWAP_END_SECS        = 10;   
-const TWAP_INTERVAL_MS     = 3_000; 
-const NEWS_MIN_SCORE       = 0.20;
-const CANCEL_BUCKET_RATE   = 45;   
-const CANCEL_BUCKET_MAX    = 45;   
-const PASSIVE_OFFSET_CENTS = 1;    
+const RING_SIZE = 100;
+const OFI_WINDOW = 20;
+const OFI_THRESHOLD = 0.30;
+const MAX_EXPOSURE_CENTS = 2_000_000;
+const ORDER_STRONG_CENTS = 600_000;
+const ORDER_MED_CENTS = 300_000;
+const ORDER_NEWS_CENTS = 700_000;
+const ORDER_NEWS_XL_CENTS = 1_400_000;
+const WARMUP_TICKS = OFI_WINDOW + 5;
+const COOLDOWN_MS = 250;
+const ORDER_TTL_MS = 800;
+const SWEEP_INTERVAL_MS = 200;
+const TWAP_START_SECS = 120;
+const TWAP_END_SECS = 10;
+const TWAP_INTERVAL_MS = 3_000;
+const NEWS_MIN_SCORE = 0.20;
+const CANCEL_BUCKET_RATE = 45;
+const CANCEL_BUCKET_MAX = 45;
+const PASSIVE_OFFSET_CENTS = 1;
 const cancelBucket = {
-  tokens:    CANCEL_BUCKET_MAX,
+  tokens: CANCEL_BUCKET_MAX,
   lastRefill: Date.now(),
   consume() {
-    const now  = Date.now();
-    const dt   = (now - this.lastRefill) / 1000;       
+    const now = Date.now();
+    const dt = (now - this.lastRefill) / 1000;
     this.tokens = Math.min(
       CANCEL_BUCKET_MAX,
       this.tokens + dt * CANCEL_BUCKET_RATE
@@ -42,10 +42,10 @@ const cancelBucket = {
 };
 class RingBuffer {
   constructor(size) {
-    this.buf  = new Float64Array(size);
+    this.buf = new Float64Array(size);
     this.size = size;
-    this.head = 0;       
-    this.count = 0;      
+    this.head = 0;
+    this.count = 0;
   }
   push(v) {
     this.buf[this.head] = v;
@@ -60,7 +60,7 @@ class RingBuffer {
   oldest() {
     if (this.count === 0) return NaN;
     if (this.count < this.size) return this.buf[0];
-    return this.buf[this.head]; 
+    return this.buf[this.head];
   }
   at(i) {
     if (i < 0 || i >= this.count) return NaN;
@@ -71,28 +71,28 @@ class RingBuffer {
 }
 class TickerState {
   constructor(ticker) {
-    this.ticker      = ticker;
-    this.prices      = new RingBuffer(RING_SIZE);
-    this.ofiDeltas   = new RingBuffer(OFI_WINDOW);
-    this.bidVol      = new RingBuffer(OFI_WINDOW);  
-    this.askVol      = new RingBuffer(OFI_WINDOW);  
-    this.microPrice  = 0;   
-    this.ofiRatio    = 0;   
-    this.prevPrice   = 0;   
-    this.tickCount   = 0;
-    this.lastOrderAt = 0;   
+    this.ticker = ticker;
+    this.prices = new RingBuffer(RING_SIZE);
+    this.ofiDeltas = new RingBuffer(OFI_WINDOW);
+    this.bidVol = new RingBuffer(OFI_WINDOW);
+    this.askVol = new RingBuffer(OFI_WINDOW);
+    this.microPrice = 0;
+    this.ofiRatio = 0;
+    this.prevPrice = 0;
+    this.tickCount = 0;
+    this.lastOrderAt = 0;
   }
 }
 const ledger = {
-  availableCash:   0,      
-  sequesteredCash: 0,      
+  availableCash: 0,
+  sequesteredCash: 0,
   confirmedPos: new Map(),
   openOrders: new Map(),
   pendingQueue: new Map(),
   sequester(ticker, side, priceCents, qty) {
     const cost = priceCents * qty;
     if (side === "BUY") {
-      this.availableCash   -= cost;
+      this.availableCash -= cost;
       this.sequesteredCash += cost;
     }
     const key = `${ticker}:${side}`;
@@ -103,7 +103,7 @@ const ledger = {
     const key = `${ticker}:${side}`;
     const queue = this.pendingQueue.get(key);
     if (!queue || queue.length === 0) return null;
-    const entry = queue.shift();  
+    const entry = queue.shift();
     this.openOrders.set(serverOrderId, entry);
     return entry;
   },
@@ -114,8 +114,8 @@ const ledger = {
     const entry = queue.shift();
     if (entry.side === "BUY") {
       const cost = entry.priceCents * entry.qty;
-      this.availableCash   += cost;
-      this.sequesteredCash  = Math.max(0, this.sequesteredCash - cost);
+      this.availableCash += cost;
+      this.sequesteredCash = Math.max(0, this.sequesteredCash - cost);
     }
   },
   release(serverOrderId) {
@@ -123,13 +123,13 @@ const ledger = {
     if (!o) return;
     if (o.side === "BUY") {
       const cost = o.priceCents * o.qty;
-      this.availableCash   += cost;
-      this.sequesteredCash  = Math.max(0, this.sequesteredCash - cost);
+      this.availableCash += cost;
+      this.sequesteredCash = Math.max(0, this.sequesteredCash - cost);
     }
     this.openOrders.delete(serverOrderId);
   },
   reconcile(serverCashCents, serverPos) {
-    const localTotal  = this.availableCash + this.sequesteredCash;
+    const localTotal = this.availableCash + this.sequesteredCash;
     const serverTotal = serverCashCents;
     if (Math.abs(serverTotal - localTotal) > 500) {
       const drift = serverTotal - localTotal;
@@ -148,16 +148,16 @@ const ledger = {
     return (this.confirmedPos.get(ticker) ?? 0) * currentPriceCents;
   },
 };
-function trackOrder(_id, _ticker)   {  }
-function untrackOrder(_id, _ticker) {  }
+function trackOrder(_id, _ticker) { }
+function untrackOrder(_id, _ticker) { }
 let _pendingLabel = 0;
 function nextLabel() {
   return ++_pendingLabel;
 }
 function updateOFI(state, newPriceCents) {
   const prev = state.prevPrice;
-  if (prev === 0) return; 
-  const delta = newPriceCents - prev; 
+  if (prev === 0) return;
+  const delta = newPriceCents - prev;
   state.bidVol.push(delta > 0 ? delta : 0);
   state.askVol.push(delta < 0 ? -delta : 0);
   state.ofiDeltas.push(delta);
@@ -171,7 +171,7 @@ function computeMicroPrice(state, midPriceCents) {
     totalAsk += state.askVol.at(i);
   }
   const total = totalBid + totalAsk;
-  if (total === 0) return midPriceCents; 
+  if (total === 0) return midPriceCents;
   const bidPrice = midPriceCents - PASSIVE_OFFSET_CENTS;
   const askPrice = midPriceCents + PASSIVE_OFFSET_CENTS;
   return Math.round((totalBid * askPrice + totalAsk * bidPrice) / total);
@@ -182,59 +182,59 @@ function computeOFIRatio(state) {
   const n = state.ofiDeltas.count;
   for (let i = 0; i < n; i++) {
     const d = state.ofiDeltas.at(i);
-    netFlow   += d;
+    netFlow += d;
     totalFlow += Math.abs(d);
   }
   if (totalFlow === 0) return 0;
-  return netFlow / totalFlow; 
+  return netFlow / totalFlow;
 }
 const client = new HFTSiegeClient({
-  url:        WS_URL,
-  username:   USERNAME,
-  password:   PASSWORD,
-  reconnect:  true,
+  url: WS_URL,
+  username: USERNAME,
+  password: PASSWORD,
+  reconnect: true,
 });
 
 // 🚨 THE MONKEY PATCH: Intercept and fix SDK bugs from our side 🚨
 if (typeof client._dispatch === 'function') {
   const originalDispatch = client._dispatch.bind(client);
-  
-  client._dispatch = function(msg) {
+
+  client._dispatch = function (msg) {
     try {
       let parsed = typeof msg === 'string' ? JSON.parse(msg) : msg;
 
       // If it's the leaderboard and payload is an Array (the bug causing the crash)
       if (parsed && parsed.type === "leaderboard" && Array.isArray(parsed.payload)) {
-        
+
         // Translate PascalCase server keys to snake_case so the SDK finds them
         const fixedEntries = parsed.payload.map(e => ({
           participant_id: e.ParticipantID,
-          net_worth:      e.NetWorth,
-          cash:           e.Cash
+          net_worth: e.NetWorth,
+          cash: e.Cash
         }));
 
         // Re-shape the payload into the { entries: [] } format the SDK is looking for
         parsed.payload = { entries: fixedEntries };
-        
+
         // Hand the fixed data back to the original SDK function
         return originalDispatch(typeof msg === 'string' ? JSON.stringify(parsed) : parsed);
       }
     } catch (e) {
-      // If JSON parsing fails, just ignore it and let the SDK handle the error normally
+      console.warn("⚠️  Monkey patch dispatch error:", e.message);
     }
-    
+
     // For all other normal messages (prices, trades), pass them through untouched
     return originalDispatch(msg);
   };
 }
 // ═══════════════════════════════════════════════════════════════════
-const tickerStates = new Map();   
-let roundActive      = false;
-let remainingSecs    = 600;
-let myRank           = "?";
-let twapTimerId      = null;      
-let sweepTimerId     = null;      
-let frozenUntil      = 0;         
+const tickerStates = new Map();
+let roundActive = false;
+let remainingSecs = 600;
+let myRank = "?";
+let twapTimerId = null;
+let sweepTimerId = null;
+let frozenUntil = 0;
 client.on("connected", () => {
   console.log(`\n✅ Connected as "${USERNAME}" — OFI engine warming up...\n`);
   if (sweepTimerId) clearInterval(sweepTimerId);
@@ -242,8 +242,8 @@ client.on("connected", () => {
 });
 client.on("disconnected", ({ code }) => {
   console.warn(`🔌 Disconnected (${code}). Reconnecting...`);
-  roundActive  = false;   
-  frozenUntil  = 0;       
+  roundActive = false;
+  frozenUntil = 0;
   clearInterval(sweepTimerId);
   clearInterval(twapTimerId);
   twapTimerId = null;
@@ -273,7 +273,7 @@ client.on("wallet_update", ({ cash: c, positions: pos, netWorthDollars }) => {
   const worthStr = typeof netWorthDollars === "number"
     ? `$${netWorthDollars.toFixed(2)}` : "N/A";
   const avail = (ledger.availableCash / 100).toFixed(2);
-  const seq   = (ledger.sequesteredCash / 100).toFixed(2);
+  const seq = (ledger.sequesteredCash / 100).toFixed(2);
   console.log(`💰 Available: $${avail} | Sequestered: $${seq} | Net Worth: ${worthStr} | Rank: ${myRank}`);
 });
 client.on("price_update", ({ ticker, price }) => {
@@ -288,25 +288,25 @@ client.on("price_update", ({ ticker, price }) => {
   state.tickCount++;
   if (state.ofiDeltas.count >= OFI_WINDOW) {
     state.microPrice = computeMicroPrice(state, price);
-    state.ofiRatio   = computeOFIRatio(state);
+    state.ofiRatio = computeOFIRatio(state);
   }
-  if (!roundActive)                          return;
-  if (state.tickCount < WARMUP_TICKS)        return;
-  if (remainingSecs <= TWAP_START_SECS)      return; 
+  if (!roundActive) return;
+  if (state.tickCount < WARMUP_TICKS) return;
+  if (remainingSecs <= TWAP_START_SECS) return;
   const now = Date.now();
   if (now - state.lastOrderAt < COOLDOWN_MS) return;
   evaluateOFISignal(ticker, price, state, now);
 });
 function evaluateOFISignal(ticker, priceCents, state, now) {
-  const ofi      = state.ofiRatio;
-  const micro    = state.microPrice;
-  const absOFI   = Math.abs(ofi);
-  if (absOFI < OFI_THRESHOLD) return; 
+  const ofi = state.ofiRatio;
+  const micro = state.microPrice;
+  const absOFI = Math.abs(ofi);
+  if (absOFI < OFI_THRESHOLD) return;
   const isStrong = absOFI >= 0.55;
   const confirmedShares = ledger.confirmedPos.get(ticker) ?? 0;
-  const pendingBuyQueue  = ledger.pendingQueue.get(`${ticker}:BUY`)  ?? [];
+  const pendingBuyQueue = ledger.pendingQueue.get(`${ticker}:BUY`) ?? [];
   const pendingSellQueue = ledger.pendingQueue.get(`${ticker}:SELL`) ?? [];
-  const pendingBuyQty  = pendingBuyQueue.reduce((s, o) => s + o.qty, 0);
+  const pendingBuyQty = pendingBuyQueue.reduce((s, o) => s + o.qty, 0);
   const pendingSellQty = pendingSellQueue.reduce((s, o) => s + o.qty, 0);
   const effectiveLong = Math.max(0, confirmedShares - pendingSellQty);
   const effectiveBuyExposure = (confirmedShares + pendingBuyQty) * priceCents;
@@ -314,15 +314,15 @@ function evaluateOFISignal(ticker, priceCents, state, now) {
     const headroomCents = MAX_EXPOSURE_CENTS - effectiveBuyExposure;
     if (headroomCents <= 0) return;
     const budgetCents = isStrong ? ORDER_STRONG_CENTS : ORDER_MED_CENTS;
-    const spendCents  = Math.min(budgetCents, headroomCents, ledger.availableCash);
-    const qty         = Math.floor(spendCents / priceCents);
+    const spendCents = Math.min(budgetCents, headroomCents, ledger.availableCash);
+    const qty = Math.floor(spendCents / priceCents);
     if (qty <= 0) return;
     const limitPrice = Math.max(micro - PASSIVE_OFFSET_CENTS, priceCents - 2);
     submitOrder(ticker, "BUY", limitPrice, qty, state, now);
   } else {
     if (effectiveLong <= 0) return;
     const budgetCents = isStrong ? ORDER_STRONG_CENTS : ORDER_MED_CENTS;
-    const qty         = Math.min(effectiveLong, Math.floor(budgetCents / priceCents));
+    const qty = Math.min(effectiveLong, Math.floor(budgetCents / priceCents));
     if (qty <= 0) return;
     const limitPrice = micro + PASSIVE_OFFSET_CENTS;
     submitOrder(ticker, "SELL", limitPrice, qty, state, now);
@@ -330,7 +330,7 @@ function evaluateOFISignal(ticker, priceCents, state, now) {
 }
 function submitOrder(ticker, side, priceCents, qty, state, now) {
   if (side === "BUY" && ledger.availableCash < priceCents * qty) return;
-  const label = nextLabel(); 
+  const label = nextLabel();
   ledger.sequester(ticker, side, priceCents, qty);
   const tag = side === "BUY" ? "📗 BUY " : "📕 SELL";
   console.log(
@@ -344,11 +344,11 @@ function submitOrder(ticker, side, priceCents, qty, state, now) {
   if (state) state.lastOrderAt = now ?? Date.now();
 }
 function sweepStaleLimitOrders() {
-  if (frozenUntil > Date.now()) return; 
+  if (frozenUntil > Date.now()) return;
   const now = Date.now();
   for (const [orderId, order] of ledger.openOrders.entries()) {
-    if (now - order.sentAt < ORDER_TTL_MS) continue; 
-    if (!cancelBucket.consume()) break; 
+    if (now - order.sentAt < ORDER_TTL_MS) continue;
+    if (!cancelBucket.consume()) break;
     console.log(
       `🗑  Cancel stale order ${orderId}` +
       ` ${order.side} ${order.ticker} x${order.qty}` +
@@ -371,22 +371,22 @@ client.on("news_flash", ({ headline, ticker, sentimentScore }) => {
   for (const t of targets) {
     const state = tickerStates.get(t);
     if (!state || state.prices.count === 0) continue;
-    const rawPrice    = state.prices.last();
+    const rawPrice = state.prices.last();
     const latestPrice = (typeof rawPrice === "number" && isFinite(rawPrice) && rawPrice > 0)
       ? rawPrice : 0;
-    if (latestPrice <= 0) continue;  
-    const micro        = state.microPrice || latestPrice;
+    if (latestPrice <= 0) continue;
+    const micro = state.microPrice || latestPrice;
     const confirmedQty = ledger.confirmedPos.get(t) ?? 0;
-    const budget       = absScore > 0.6 ? ORDER_NEWS_XL_CENTS : ORDER_NEWS_CENTS;
-    const pendingBuys  = (ledger.pendingQueue.get(`${t}:BUY`)  ?? []).reduce((s, o) => s + o.qty, 0);
+    const budget = absScore > 0.6 ? ORDER_NEWS_XL_CENTS : ORDER_NEWS_CENTS;
+    const pendingBuys = (ledger.pendingQueue.get(`${t}:BUY`) ?? []).reduce((s, o) => s + o.qty, 0);
     const pendingSells = (ledger.pendingQueue.get(`${t}:SELL`) ?? []).reduce((s, o) => s + o.qty, 0);
-    const effectiveLong         = Math.max(0, confirmedQty - pendingSells);
-    const effectiveBuyExposure  = (confirmedQty + pendingBuys) * latestPrice;
+    const effectiveLong = Math.max(0, confirmedQty - pendingSells);
+    const effectiveBuyExposure = (confirmedQty + pendingBuys) * latestPrice;
     if (sentimentScore > 0) {
-      const headroom   = MAX_EXPOSURE_CENTS - effectiveBuyExposure;
+      const headroom = MAX_EXPOSURE_CENTS - effectiveBuyExposure;
       if (headroom <= 0) continue;
       const spendCents = Math.min(budget, headroom, ledger.availableCash);
-      const qty        = Math.floor(spendCents / latestPrice);
+      const qty = Math.floor(spendCents / latestPrice);
       if (qty <= 0) continue;
       const limitPrice = Math.max(micro, latestPrice);
       console.log(`   🚀 NEWS BUY  ${t} x${qty} @ $${(limitPrice / 100).toFixed(2)} (limit)`);
@@ -403,20 +403,20 @@ client.on("news_flash", ({ headline, ticker, sentimentScore }) => {
   console.log();
 });
 function startTwapLiquidation() {
-  if (twapTimerId !== null) return; 
+  if (twapTimerId !== null) return;
   twapTimerId = setInterval(() => {
     if (!roundActive || remainingSecs <= 0) {
       clearInterval(twapTimerId);
       twapTimerId = null;
       return;
     }
-    const timeLeft  = Math.max(remainingSecs - TWAP_END_SECS, 1);
-    const tranches  = Math.max(1, Math.floor(timeLeft * 1000 / TWAP_INTERVAL_MS));
+    const timeLeft = Math.max(remainingSecs - TWAP_END_SECS, 1);
+    const tranches = Math.max(1, Math.floor(timeLeft * 1000 / TWAP_INTERVAL_MS));
     let totalLiquidated = 0;
     for (const [ticker, qty] of ledger.confirmedPos.entries()) {
       if (qty <= 0) continue;
-      const state       = tickerStates.get(ticker);
-      const rawPrice    = state?.prices.last();
+      const state = tickerStates.get(ticker);
+      const rawPrice = state?.prices.last();
       const latestPrice = (typeof rawPrice === "number" && isFinite(rawPrice) && rawPrice > 0)
         ? rawPrice : 0;
       if (latestPrice <= 0) continue;
@@ -425,8 +425,8 @@ function startTwapLiquidation() {
       const availableQty = Math.max(0, qty - pendingSells);
       if (availableQty <= 0) continue;
       const trancheQty = Math.max(1, Math.ceil(availableQty / tranches));
-      const sellQty    = Math.min(availableQty, trancheQty);
-      const micro      = state?.microPrice || latestPrice;
+      const sellQty = Math.min(availableQty, trancheQty);
+      const micro = state?.microPrice || latestPrice;
       const limitPrice = Math.max(micro - PASSIVE_OFFSET_CENTS, latestPrice - 5);
       console.log(
         `⏳ TWAP SELL ${ticker} x${sellQty}/${qty}` +
@@ -446,11 +446,11 @@ function startTwapLiquidation() {
 client.on("order_response", ({ orderId: serverOrderId, success, message, trades }) => {
   if (!success) {
     let oldestTime = Infinity;
-    let oldestKey  = null;
+    let oldestKey = null;
     for (const [key, queue] of ledger.pendingQueue.entries()) {
       if (queue.length > 0 && queue[0].sentAt < oldestTime) {
         oldestTime = queue[0].sentAt;
-        oldestKey  = key;
+        oldestKey = key;
       }
     }
     if (oldestKey) {
@@ -463,11 +463,11 @@ client.on("order_response", ({ orderId: serverOrderId, success, message, trades 
     return;
   }
   let oldestTime2 = Infinity;
-  let oldestKey2  = null;
+  let oldestKey2 = null;
   for (const [key, queue] of ledger.pendingQueue.entries()) {
     if (queue.length > 0 && queue[0].sentAt < oldestTime2) {
       oldestTime2 = queue[0].sentAt;
-      oldestKey2  = key;
+      oldestKey2 = key;
     }
   }
   if (oldestKey2) {
@@ -501,10 +501,10 @@ client.on("order_response", ({ orderId: serverOrderId, success, message, trades 
   }
 });
 client.on("trade", ({ ticker, quantity, priceDollars, buyerId, sellerId, tradeId }) => {
-  const isBuyer  = buyerId  === USERNAME;
+  const isBuyer = buyerId === USERNAME;
   const isSeller = sellerId === USERNAME;
   if (!isBuyer && !isSeller) return;
-  const role     = isBuyer ? "BOUGHT" : "SOLD";
+  const role = isBuyer ? "BOUGHT" : "SOLD";
   const priceStr = typeof priceDollars === "number"
     ? `$${priceDollars.toFixed(2)}` : "?";
   console.log(`🤝 ${role} ${ticker} x${quantity} @ ${priceStr}  [tradeId=${tradeId ?? "?"}]`);
@@ -518,11 +518,11 @@ client.on("trade", ({ ticker, quantity, priceDollars, buyerId, sellerId, tradeId
   }
 });
 function releaseOldestOpenOrder(ticker, side, qty) {
-  let oldestId   = null;
+  let oldestId = null;
   let oldestTime = Infinity;
   for (const [id, o] of ledger.openOrders.entries()) {
     if (o.ticker === ticker && o.side === side && o.sentAt < oldestTime) {
-      oldestId   = id;
+      oldestId = id;
       oldestTime = o.sentAt;
     }
   }
@@ -540,7 +540,7 @@ function releaseOldestOpenOrder(ticker, side, qty) {
   }
 }
 client.on("fraud_alert", (payload) => {
-  frozenUntil = Date.now() + 60_000; 
+  frozenUntil = Date.now() + 60_000;
   console.error(`\n🚨 FRAUD ALERT — wallet frozen for 60s! ${JSON.stringify(payload)}`);
   console.error(`   Cancel sweeper paused until freeze expires.\n`);
 });
@@ -549,9 +549,9 @@ client.on("leaderboard", (entries) => {
   const me = entries.find(e => e.participantId === USERNAME);
   if (me) {
     myRank = `#${me.rank}`;
-    const total  = entries.length;
-    const emoji  = me.rank === 1 ? "🥇" : me.rank === 2 ? "🥈" : me.rank === 3 ? "🥉" : "📊";
-    const worth  = typeof me.netWorthDollars === "number"
+    const total = entries.length;
+    const emoji = me.rank === 1 ? "🥇" : me.rank === 2 ? "🥈" : me.rank === 3 ? "🥉" : "📊";
+    const worth = typeof me.netWorthDollars === "number"
       ? `$${me.netWorthDollars.toFixed(2)}` : "N/A";
     console.log(`${emoji} Rank: ${myRank}/${total} | Net Worth: ${worth}`);
   }
@@ -565,11 +565,11 @@ client.on("round_end", (payload) => {
   console.log(`   Winner: ${payload?.winner ?? "?"}`);
   console.log(`═════════════════════════════════════════`);
   (payload?.leaderboard ?? []).slice(0, 10).forEach((e, i) => {
-    const medal  = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
-    const isMe   = e.participant_id === USERNAME;   
+    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
+    const isMe = e.participant_id === USERNAME;
     const marker = isMe ? "  ⬅️  YOU" : "";
-    const worth  = typeof e.net_worth === "number"
-      ? `$${(e.net_worth / 100).toFixed(2)}`        
+    const worth = typeof e.net_worth === "number"
+      ? `$${(e.net_worth / 100).toFixed(2)}`
       : "N/A";
     console.log(`  ${medal}  ${e.participant_id ?? "?"}: ${worth}${marker}`);
   });
